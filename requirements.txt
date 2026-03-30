@@ -1,0 +1,15 @@
+# 核心框架
+langchain>=0.3.0
+langchain-openai>=0.2.0
+# 文档处理
+pypdf>=4.3.0
+# 向量数据库
+faiss-cpu>=1.8.0
+# 配置管理
+python-dotenv>=1.0.0
+# Web服务
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-multipart>=0.0.9
+# 日志
+loguru>=0.7.2

@@ -136,7 +136,10 @@ async def chat(request: ChatRequest):
     if not request.question:
         raise HTTPException(status_code=400, detail="请输入问题")
 
-    answer = rag_chain_with_memory.invoke({"question": request.question})
+    answer = rag_chain_with_memory.invoke(
+        {"question": request.question},
+        config={"configurable": {"session_id": request.session_id}}
+    )
     return BaseResponse(data={"answer": answer})
 
 

@@ -33,17 +33,17 @@ def clear_session_history(session_id: str) -> bool:
             url="redis://localhost:6379/0"
         )
         history.clear()
-        logger.info(f"✅ Redis会话 {session_id} 已清空")
+        logger.info(f" Redis会话 {session_id} 已清空")
         return True
     except Exception as e:
-        logger.error(f"❌ 清空会话失败：{str(e)}")
+        logger.error(f" 清空会话失败：{str(e)}")
         return False
 
-# ===================== 初始化 32B 大模型 =====================
+# ===================== 初始化 14B 大模型 =====================
 llm = ChatOllama(
-    model="qwen:32b",  # ，必须和ollama list一致
+    model="qwen3:14b",  # ，必须和ollama list一致
     base_url="http://127.0.0.1:11434",
-    temperature=0.1,
+    temperature=0.2,
     timeout=30,      # 👈 加超时，防止无限等待
     streaming=False  # 👈 关闭流式输出，直接返回完整结果
 )

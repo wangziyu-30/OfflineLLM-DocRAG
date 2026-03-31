@@ -3,17 +3,26 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from sentence_transformers import CrossEncoder
 import os
+from langchain_ollama import OllamaEmbeddings
 
-
+# class VectorStoreManager:
+#     def __init__(self, model_name="all-MiniLM-L6-v2"):
+#         # 初始化所有属性
+#         self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+#         self.vector_store = None
+#         self.reranker = CrossEncoder("BAAI/bge-reranker-base")
+#         self.docs = []
+#         self.save_path = "./vector_store"
+# 导入 Ollama 向量模型包
 class VectorStoreManager:
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
-        # 初始化所有属性
-        self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+    def __init__(self, model_name="nomic-embed-text:latest"):
+        # ✅ 正确：使用 Ollama 本地向量模型（和你的大模型一套体系）
+        self.embeddings = OllamaEmbeddings(model=model_name)
+
         self.vector_store = None
         self.reranker = CrossEncoder("BAAI/bge-reranker-base")
         self.docs = []
         self.save_path = "./vector_store"
-
     def add_documents(self, docs):
         self.load_documents(docs)
         self.build_vector_store()

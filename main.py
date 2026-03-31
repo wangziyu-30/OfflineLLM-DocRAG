@@ -1,186 +1,147 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
-from loguru import logger
+from typing import Optional
 import json
+import io
+# 处理Word文档依赖
+import docx
+import win32com.client
 
-# 导入我们开发的RAG核心模块
-from rag.config import settings
-from rag.vector_store import vector_store_manager
-from rag.document_processor import document_processor
-from rag.chain import rag_chain_with_memory, clear_session_history
+# 导入你的项目核心模块
+from rag.vector_store import VectorStoreManager
+from rag.config import get_semantic_text_splitter
+from rag.chain import rag_chain_with_memory
+from langchain_core.documents import Document
 
-# ========== 1. 初始化FastAPI应用 ==========
-app = FastAPI(
-    title="RAG知识库问答系统",
-    description="基于LangChain + FastAPI开发的企业级知识库问答服务",
-    version="1.0.0"
-)
-
-# ========== 2. 配置CORS跨域 ==========
+# ========== 初始化 ==========
+app = FastAPI(title="RAG知识库问答系统", version="1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境替换为你的前端域名，比如["https://your-frontend.com"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ========== 3. 统一响应模型定义 ==========
+# 加载本地向量库 + 分块器
+vector_store = VectorStoreManager()
+vector_store.load_vector_store()
+text_splitter = get_semantic_text_splitter()
+
+
+# ========== 基础模型 ==========
 class BaseResponse(BaseModel):
-    """所有接口的统一返回格式"""
     code: int = 200
     message: str = "success"
-    data: Optional[dict | list | str | int] = None
+    data: Optional[dict] = None
 
-# ========== 4. 请求模型定义 ==========
+
 class ChatRequest(BaseModel):
-    """问答接口的请求参数"""
-    session_id: str  # 会话ID，用于隔离不同用户的对话历史
-    question: str    # 用户的问题
-    stream: bool = False  # 是否开启流式输出
+    session_id: str = "user1"
+    question: str
 
-# ========== 5. 工具类接口 ==========
-@app.get("/health", summary="健康检查接口", response_model=BaseResponse, tags=["工具接口"])
-async def health_check():
-    """检查服务是否正常运行"""
-    return BaseResponse(
-        data={
-            "status": "running",
-            "document_count": vector_store_manager.get_document_count()
-        }
-    )
 
-@app.get("/index-info", summary="获取知识库索引信息", response_model=BaseResponse, tags=["工具接口"])
-async def get_index_info():
-    """获取当前知识库的文档数量、存储路径等信息"""
-    return BaseResponse(
-        data={
-            "document_count": vector_store_manager.get_document_count(),
-            "vector_store_path": settings.VECTOR_STORE_PATH,
-            "chunk_size": settings.CHUNK_SIZE,
-            "retrieve_top_k": settings.RETRIEVE_TOP_K
-        }
-    )
+# ========== 首页 ==========
+@app.get("/", response_model=BaseResponse)
+async def index():
+    return BaseResponse(message="RAG服务已启动 | 支持 TXT/MD/DOC/DOCX 上传")
 
-@app.delete("/clear-index", summary="清空知识库索引", response_model=BaseResponse, tags=["工具接口"])
-async def clear_index():
-    """清空知识库中的所有文档和索引"""
+
+# ========== 读取不同格式文件的工具函数 ==========
+def read_docx(file_bytes: bytes) -> str:
+    """读取DOCX文件"""
+    doc = docx.Document(io.BytesIO(file_bytes))
+    return "\n".join([para.text for para in doc.paragraphs])
+
+
+def read_doc(file_path: str) -> str:
+    """Windows下读取老版DOC文件"""
     try:
-        vector_store_manager.clear_vector_store()
-        return BaseResponse(message="知识库清空成功")
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(file_path)
+        content = doc.Content.Text
+        doc.Close()
+        word.Quit()
+        return content
     except Exception as e:
-        logger.error(f"清空知识库失败：{str(e)}")
+        raise Exception(f"DOC文件读取失败：{str(e)}")
+
+
+# ========== 🔥 全格式上传接口（TXT/MD/DOC/DOCX） ==========
+@app.post("/upload", response_model=BaseResponse)
+async def upload_file(file: UploadFile = File(...)):
+    # 支持所有格式
+    ext = file.filename.split(".")[-1].lower()
+    support_exts = ["txt", "md", "markdown", "doc", "docx"]
+    if ext not in support_exts:
+        raise HTTPException(status_code=400, detail="仅支持：TXT/MD/DOC/DOCX 文件")
+
+    try:
+        file_bytes = await file.read()
+        content = ""
+
+        # 1. 读取文本类文件
+        if ext in ["txt", "md", "markdown"]:
+            try:
+                content = file_bytes.decode("utf-8")
+            except:
+                content = file_bytes.decode("gbk")
+
+        # 2. 读取DOCX文件
+        elif ext == "docx":
+            content = read_docx(file_bytes)
+
+        # 3. 读取DOC文件（老版Word）
+        elif ext == "doc":
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".doc") as temp_file:
+                temp_file.write(file_bytes)
+                temp_path = temp_file.name
+            content = read_doc(temp_path)
+
+        # 文档分块
+        doc = Document(page_content=content, metadata={"filename": file.filename})
+        split_docs = text_splitter.split_documents([doc])
+
+        # 添加到知识库
+        vector_store.add_documents(split_docs)
+
+        return BaseResponse(
+            data={
+                "文件名": file.filename,
+                "分块数": len(split_docs),
+                "当前知识库总条数": vector_store.get_document_count()
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"上传失败：{str(e)}")
+
+
+# ========== 清空知识库 ==========
+@app.delete("/clear", response_model=BaseResponse)
+async def clear_knowledge_base():
+    try:
+        vector_store.docs = []
+        vector_store.vector_store = None
+        return BaseResponse(message="知识库已清空成功！")
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"清空失败：{str(e)}")
 
-@app.delete("/clear-session", summary="清空会话历史", response_model=BaseResponse, tags=["会话管理"])
-async def clear_session(session_id: str):
-    """清空指定会话的对话历史"""
-    success = clear_session_history(session_id)
-    if success:
-        return BaseResponse(message="会话历史清空成功")
-    else:
-        raise HTTPException(status_code=404, detail="会话ID不存在")
 
-# ========== 6. 核心业务接口 ==========
-@app.post("/upload", summary="上传文档并构建知识库", response_model=BaseResponse, tags=["文档管理"])
-async def upload_documents(files: List[UploadFile] = File(..., description="支持PDF/TXT/Markdown格式的文档")):
-    """
-    上传多个文档，系统会自动解析、分块、添加到知识库，增量更新索引
-    """
-    if not files:
-        raise HTTPException(status_code=400, detail="请选择要上传的文件")
-
-    success_count = 0
-    failed_files = []
-    all_split_docs = []
-
-    for file in files:
-        try:
-            # 校验文件格式
-            file_ext = file.filename.split(".")[-1].lower()
-            support_ext = ["pdf", "txt", "md", "markdown"]
-            if file_ext not in support_ext:
-                failed_files.append(f"{file.filename}（不支持的文件格式）")
-                continue
-
-            # 处理文档：加载、分块
-            split_docs = document_processor.load_and_split_document(file.file, file.filename)
-            all_split_docs.extend(split_docs)
-            success_count += 1
-        except Exception as e:
-            failed_files.append(f"{file.filename}（处理失败：{str(e)}）")
-            continue
-
-    # 批量添加到向量库
-    if all_split_docs:
-        vector_store_manager.add_documents(all_split_docs)
-
-    # 返回处理结果
-    return BaseResponse(
-        data={
-            "success_count": success_count,
-            "failed_files": failed_files,
-            "total_chunk_count": len(all_split_docs),
-            "current_document_count": vector_store_manager.get_document_count()
-        }
-    )
-
-@app.post("/chat", summary="知识库问答核心接口", tags=["问答服务"])
+# ========== 问答接口 ==========
+@app.post("/chat", response_model=BaseResponse)
 async def chat(request: ChatRequest):
-    """
-    知识库问答核心接口，支持同步非流式响应和SSE流式输出
-    - session_id: 会话ID，用于隔离不同用户的对话历史，必须保证唯一
-    - question: 用户的问题
-    - stream: 是否开启流式输出，开启后返回SSE流式响应，前端用EventSource接收
-    """
-    # 参数校验
-    if not request.session_id:
-        raise HTTPException(status_code=400, detail="session_id不能为空")
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="问题不能为空")
+    if not request.question:
+        raise HTTPException(status_code=400, detail="请输入问题")
 
-    # 校验知识库是否为空
-    if vector_store_manager.get_document_count() == 0:
-        raise HTTPException(status_code=400, detail="知识库为空，请先上传文档构建索引")
+    answer = rag_chain_with_memory.invoke({"question": request.question})
+    return BaseResponse(data={"answer": answer})
 
-    try:
-        # 流式输出模式
-        if request.stream:
-            async def event_generator():
-                """SSE事件生成器，逐块返回大模型的输出"""
-                async for chunk in rag_chain_with_memory.astream(
-                    input={"question": request.question},
-                    config={"configurable": {"session_id": request.session_id}}
-                ):
-                    if chunk:
-                        # SSE标准格式，前端用EventSource.onmessage接收
-                        yield f"data: {json.dumps({'content': chunk})}\n\n"
-                # 结束标记，告诉前端回答已完成
-                yield f"data: {json.dumps({'content': '', 'is_end': True})}\n\n"
 
-            # 返回流式响应
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
-            )
-
-        # 非流式同步模式
-        else:
-            response = await rag_chain_with_memory.ainvoke(
-                input={"question": request.question},
-                config={"configurable": {"session_id": request.session_id}}
-            )
-            return BaseResponse(data={"answer": response, "session_id": request.session_id})
-
-    except Exception as e:
-        logger.error(f"问答接口调用失败：{str(e)}")
-        raise HTTPException(status_code=500, detail=f"问答失败：{str(e)}")
-
-# ========== 7. 启动服务 ==========
+# ========== 启动服务 ==========
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host=settings.HOST, port=settings.PORT)
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)

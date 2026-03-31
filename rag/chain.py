@@ -10,17 +10,17 @@ from loguru import logger
 
 # 导入配置 + 向量库管理器
 from rag.config import settings
-from rag.vector_store import vector_store_manager
+from rag.vector_store import VectorStoreManager
 
 # ===================== Redis 会话持久化（重启不丢记忆） =====================
 def get_session_history(session_id: str) -> BaseChatMessageHistory:
     return RedisChatMessageHistory(
         session_id=session_id,
-        url="redis://localhost:6379/0",
+        url="redis://localhost:6380/0",
         ttl=86400
     )
 
-# ===================== ✅ 修复：Redis 版 清除会话历史（解决爆红！） =====================
+# ===================== Redis 版 清除会话历史 =====================
 def clear_session_history(session_id: str) -> bool:
     """
     重写：清除 Redis 中的会话历史
@@ -41,12 +41,12 @@ def clear_session_history(session_id: str) -> bool:
 
 # ===================== 初始化 32B 大模型 =====================
 llm = ChatOllama(
-    model=settings.CHAT_MODEL,
-    temperature=0.3,
-    streaming=True,
-    num_gpu=1
+    model="qwen:32b",  # ，必须和ollama list一致
+    base_url="http://127.0.0.1:11434",
+    temperature=0.1,
+    timeout=30,      # 👈 加超时，防止无限等待
+    streaming=False  # 👈 关闭流式输出，直接返回完整结果
 )
-
 # ===================== 少样本 + 引用溯源 Prompt =====================
 RAG_PROMPT = """
 你是一个严格基于知识库的专业问答助手，**只允许使用检索到的上下文回答**，禁止编造任何信息！
@@ -89,7 +89,7 @@ def format_docs(docs):
     return context
 
 # ===================== 最终RAG链 =====================
-retriever = vector_store_manager.get_retriever()
+retriever = VectorStoreManager().get_retriever()
 
 # 基础RAG链
 base_rag_chain = (

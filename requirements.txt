@@ -1,15 +1,26 @@
-# 核心框架
-langchain>=0.3.0
-langchain-openai>=0.2.0
-# 文档处理
-pypdf>=4.3.0
-# 向量数据库
-faiss-cpu>=1.8.0
-# 配置管理
-python-dotenv>=1.0.0
-# Web服务
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-python-multipart>=0.0.9
-# 日志
+# 🚀 Web 服务核心
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6  # FastAPI 上传文件 必备依赖！
+
+# 🎨 前端交互界面
+streamlit>=1.28.2
+
+# 🧠 LangChain 大模型核心框架
+langchain>=0.1.0
+langchain-ollama>=0.1.0  # Ollama 本地大模型对接
+langchain-huggingface>=0.0.3  # BGE 重排序/向量模型
+
+# 📚 本地向量数据库（Windows 专用 CPU 版）
+faiss-cpu>=1.7.4
+
+# 📝 多格式文档解析（TXT / MD / DOC / DOCX）
+python-docx>=0.8.11  # 读取 DOCX
+pywin32>=306  # 读取老版 DOC 文件（Windows 专用）
+
+# 🗣️ 对话历史记忆
+redis>=5.0.1
+
+# 🔧 工具库
+pydantic>=2.4.2
 loguru>=0.7.2

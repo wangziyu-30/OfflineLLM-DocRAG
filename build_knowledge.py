@@ -1,4 +1,4 @@
-from rag.vector_store import vector_store_manager
+from rag.vector_store import VectorStoreManager
 from langchain_community.document_loaders import TextLoader
 # 导入全局配置
 from rag.config import get_semantic_text_splitter
@@ -11,9 +11,11 @@ documents = loader.load()
 text_splitter = get_semantic_text_splitter()
 split_docs = text_splitter.split_documents(documents)
 
-# 3. 关键：添加到本地向量库（永久保存）
-vector_store_manager.add_documents(split_docs)
+# 3. 【只创建一个实例】 核心修改
+vs_manager = VectorStoreManager()
+# 4. 用这个实例添加文档
+vs_manager.add_documents(split_docs)
 
-# 打印验证
+# 打印验证（同一个实例，数量正常显示）
 print(f"成功向向量库添加 {len(split_docs)} 个文档分块")
-print(f"当前向量库总分块数：{vector_store_manager.get_document_count()}")
+print(f"当前向量库总分块数：{vs_manager.get_document_count()}")

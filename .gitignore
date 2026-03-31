@@ -9,4 +9,4 @@ vector_store/
 # Python缓存
 __pycache__/
 *.pyc
-idea/
+.idea/
